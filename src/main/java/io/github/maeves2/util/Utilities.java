@@ -1,6 +1,6 @@
 package io.github.maeves2.util;
 
-import io.github.maeves2.commands.SlashCommand;
+import io.github.maeves2.core.Option;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.entities.MessageEmbed;
 import net.dv8tion.jda.api.interactions.commands.build.OptionData;
@@ -11,10 +11,8 @@ import java.io.InputStreamReader;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
+import java.util.*;
 import java.util.List;
-import java.util.Objects;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -43,11 +41,11 @@ public class Utilities {
 
      /**
      * Creates a list of {@link OptionData} from one or more
-     * {@link io.github.maeves2.commands.SlashCommand.Option} annotations
+     * {@link io.github.maeves2.core.Option} annotations
      * @param options The options (varargs)
      * @return {@link List}
      */
-    public static List<OptionData> asOptionData(SlashCommand.Option... options) {
+    public static List<OptionData> asOptionData(Option... options) {
         var ret = new ArrayList<OptionData>();
         for (var option : options)
             ret.add(new OptionData(option.type(), option.name(),

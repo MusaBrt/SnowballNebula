@@ -1,21 +1,14 @@
 package io.github.maeves2;
 
-import io.github.maeves2.commands.AutoRegister;
-import io.github.maeves2.commands.RegisteredCommand;
-import io.github.maeves2.commands.SlashCommand;
+import io.github.maeves2.core.AutoRegister;
+import io.github.maeves2.core.RegisteredCommand;
+import io.github.maeves2.core.Slash;
 import io.github.maeves2.util.Utilities;
 import net.dv8tion.jda.api.JDA;
-import net.dv8tion.jda.api.entities.Guild;
-import net.dv8tion.jda.api.events.interaction.SlashCommandEvent;
-import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.interactions.commands.build.CommandData;
-import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.slf4j.helpers.Util;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -39,7 +32,7 @@ import java.util.stream.Collectors;
  * @since 1.0.0
  * @author MaeveS2
  */
-public class SnowballNebula extends ListenerAdapter {
+public class SnowballNebula {
     /**
      * Your JDA instance
      */
@@ -50,22 +43,28 @@ public class SnowballNebula extends ListenerAdapter {
      * or {@link SnowballNebula#getCommands()}
      */
     private Map<String, RegisteredCommand> registry;
+
     /**
-     * List of all guilds the connected bot is in
-     */
-    private List<Guild> guilds;
-    /**
-     * Should certain events events be logged? Connection to a bot is aways logged.
+     * Should certain events events be logged? Connection to a bot is always logged.
      */
     private boolean log = false;
+
     /**
-     * Logger for this class
+     * @return the log field
      */
-    private final Logger logger = LoggerFactory.getLogger(SnowballNebula.class);
+    public boolean isLogging() {
+        return log;
+    }
+
     /**
-     * COMING SOON<strong>TM</strong>
+     * Logger for all the SnowballNebula things.
      */
-    private boolean globalCommands = false;
+    static final Logger logger = LoggerFactory.getLogger(SnowballNebula.class);
+
+    /**
+     * EventHorizon instance for further usages.
+     */
+    private final EventHorizon eventHorizon;
 
     /**
      * Constructor of this class :bruh: <br>
@@ -74,11 +73,11 @@ public class SnowballNebula extends ListenerAdapter {
      * @param jda Your JDA instance
      */
     public SnowballNebula(JDA jda) {
-        jda.addEventListener(this);
+        this.eventHorizon = new EventHorizon(this);
+        jda.addEventListener(this.eventHorizon);
         this.jda = jda;
         logger.info("Successfully connected to bot " + jda.getSelfUser().getName());
         this.registry = new HashMap<>();
-        this.guilds = jda.getGuilds();
     }
 
     /**
@@ -103,26 +102,25 @@ public class SnowballNebula extends ListenerAdapter {
     }
 
     /**
-     * Scans one or more classes for methods annotated with {@link SlashCommand}
+     * Scans one or more classes for methods annotated with {@link Slash}
      * and registers them.
      * @param classes The class or classes that should be checked for commands
      * @return {@link SnowballNebula} for chaining convenience
      */
     public SnowballNebula register(Class<?>... classes) {
-        Arrays.stream(classes).forEach(clazz -> {
+        for (var clazz : classes) {
             for (var method : clazz.getMethods()) {
-                var command = method.getAnnotation(SlashCommand.class);
+                var command = method.getAnnotation(Slash.class);
                 if (command != null) {
                     var options = Utilities.asOptionData(command.options());
                     var data = new CommandData(command.name(), command.desc()).addOptions(options);
                     registry.putIfAbsent(command.name(), new RegisteredCommand(
                             clazz, command.name(), command.perm(), command.permissionMessage(),
-                            method, data, options));
+                            method, data, options, command.globalCommand()));
                     if (log) logger.info("Registered new command (/" + command.name() + ") from " + clazz.getName());
-                } else
-                    continue;
+                }
             }
-        });
+        }
         return this;
     }
 
@@ -138,37 +136,29 @@ public class SnowballNebula extends ListenerAdapter {
         Utilities.getAllClassesFromPackage(targetPackage).stream()
                 .filter(e -> e.isAnnotationPresent(AutoRegister.class))
                 .collect(Collectors.toSet())
-                .forEach(e -> register(e));
+                .forEach(this::register);
         if (log) logger.info("Enabled automatic registring");
         return this;
     }
 
     /**
-     * Code to execute when a slash command is used. Overridden from the
-     * {@link ListenerAdapter} class.
-     * <h2>Do not use this method!!</h2>
+     * Uploads the commands marked as globalCommand to Discord.
+     * @return {@link SnowballNebula} for chaining convenience
      */
-    @Override
-    public void onSlashCommand(@NotNull SlashCommandEvent event) {
-        if (event.getUser().equals(jda.getSelfUser())) return;
-        var command = getRegisteredCommand(event.getName());
-        Objects.requireNonNull(command);
-
-        var perm = command.getPerm();
-        if (!event.getMember().hasPermission(perm)) {
-            var message = command.getPermissionMessage().replace("$PERMISSION$",
-                    "`" + perm.getName() + "`");
-            event.replyEmbeds(Utilities.failEmbed(message));
-            return;
+    public SnowballNebula upsertGlobalCommands() {
+        if (registry.isEmpty()) {
+            if (log) logger.warn("You should call the SnowballNebula#enableAutoRegistring(String) method before calling the SnowballNebula#upsertGlobalCommands().");
+            return this;
         }
-        try {
-            command.getMethod().invoke(command.getInstance(), event);
-            if (log) logger.info(event.getUser().getAsTag() + " executed command /" +
-                    event.getName() + " in " + event.getGuild());
-        } catch (Exception e) {
-            event.replyEmbeds(Utilities.failEmbed("Sorry, something went wrong..."));
-            e.printStackTrace();
+        int counter = 0;
+        for (RegisteredCommand value : registry.values()) {
+            if (value.isGlobalCommand()) {
+                jda.upsertCommand(value.getData()).addOptions(value.getOptions()).queue();
+                counter++;
+            }
         }
+        if (log) logger.info(String.format("%d global commands upserted to Discord succesfully.", counter));
+        return this;
     }
 
     /**
@@ -194,6 +184,6 @@ public class SnowballNebula extends ListenerAdapter {
      * @return {@link List}
      */
     public List<CommandData> getCommands() {
-        return registry.values().stream().map(e -> e.getData()).toList();
+        return registry.values().stream().map(RegisteredCommand::getData).toList();
     }
 }
